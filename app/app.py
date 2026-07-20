@@ -1,108 +1,142 @@
-import streamlit as st
-from PIL import Image, UnidentifiedImageError
+from pathlib import Path
 import numpy as np
+import streamlit as st
+import tensorflow as tf
+from PIL import Image, UnidentifiedImageError
+import json
 
-# début de la partie mock-up
-# Simulation statique 
-CLASS_NAMES = {
-    "0": "Rose rouge",
-    "1": "Tulipe jaune",
-    "2": "Tournesol",
-    "3": "Orchidée",
-    "4": "Marguerite",
-    "5": "Lys blanc"
-}
-
-def mock_predict(mode):
-    """Génère de fausses probabilités pour simuler le comportement du modèle"""
-    if mode == "haute_confiance":
-        # Le modèle est sûr de lui (85% sur Tournesol, 10% Rose, 5% Marguerite)
-        return np.array([0.10, 0.00, 0.85, 0.00, 0.05, 0.00])
-    else:
-        # Le modèle hésite (Softmax trap : 40% Tulipe, 35% Orchidée, 25% Lys)
-        return np.array([0.00, 0.40, 0.00, 0.35, 0.00, 0.25])
-
-# Side bar pour simuler le mode de test
-st.sidebar.markdown("### Mode Test (Mock-up)")
-st.sidebar.write("Simulez le comportement du modèle pour tester l'interface :")
-test_mode = st.sidebar.radio(
-    "Niveau de confiance :", 
-    ["Haute confiance (>50%)", "Basse confiance (<50%)"]
-)
-mode_arg = "haute_confiance" if test_mode == "Haute confiance (>50%)" else "basse_confiance"
-# ---- fin partie mock-up ----
-
-# Configuration
+# Configuration  page
 st.set_page_config(
     page_title="Classifieur Botanique",
     page_icon="🌿",
-    layout="centered"
+    layout="centered",
 )
 
-# Accueil
+# chemins et constantes
+BASE_DIR = Path(__file__).resolve().parent.parent  
+MODELS_DIR = BASE_DIR / "models"
+MAPPING_FILE = BASE_DIR / "notebooks/flower_mapping.json"
+IMAGE_SIZE = (224, 224)
+
+MODEL_OPTIONS = {
+    "Modèle 1 - model.keras": MODELS_DIR / "model.keras",
+    "Modèle 2 - model_v2_augmented.keras": MODELS_DIR / "model_v2_augmented.keras",
+}
+
+# loading des ressources
+@st.cache_data
+def load_class_mapping():
+    """Charge le dictionnaire des classes en mémoire une seule fois."""
+    if MAPPING_FILE.exists():
+        with open(MAPPING_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+CLASS_MAPPING = load_class_mapping()
+
+@st.cache_resource
+def load_model(model_path: str):
+    """Charge le modèle IA en mémoire."""
+    return tf.keras.models.load_model(model_path)
+
+# fonction utils
+def get_class_label(index: int) -> str:
+    """Traduit l'index numérique du modèle en nom d'espèce."""
+    if CLASS_MAPPING:
+        return CLASS_MAPPING.get(str(index), f"Espèce inconnue (Index {index})")
+    return f"Classe {index + 1}"
+
+def preprocess_image(image: Image.Image) -> np.ndarray:
+    """Prépare l'image pour le modèle MobileNetV2."""
+    image = image.convert("RGB").resize(IMAGE_SIZE)
+    image_array = np.asarray(image, dtype=np.float32) / 255.0
+    return np.expand_dims(image_array, axis=0)
+
+
+## INTERFACE !!! 
 st.title("🌿 Identificateur d'Espèces de Plantes 🌿")
 
-st.markdown("""
-Bienvenue dans notre application de reconnaissance botanique !
+st.markdown(
+    """
+Bienvenue dans l'application de reconnaissance botanique.
 
-Cette application permettra d'identifier une espèce de fleur
-à partir d'une image.
-""")
+Choisissez un modèle dans la barre latérale, puis envoyez une image pour obtenir une prédiction réelle.
+"""
+)
+
+# Sidebar/ Choix du modèle
+st.sidebar.markdown("### Modèle IA")
+selected_model_name = st.sidebar.selectbox(
+    "Choisir le modèle à utiliser",
+    list(MODEL_OPTIONS.keys()),
+)
+selected_model_path = MODEL_OPTIONS[selected_model_name]
+
+st.sidebar.caption("Les modèles sont chargés depuis le dossier models/.")
+
+# sécurité
+if not selected_model_path.exists():
+    st.error(f"Fichier introuvable : {selected_model_path.name}")
+    st.stop()
 
 st.info("Importez une image dans la case ci-dessous pour commencer l'analyse.")
 
+# upload image
 uploaded_file = st.file_uploader(
     "Choisissez une image",
-    type=["jpg", "jpeg", "png"]
+    type=["jpg", "jpeg", "png"],
 )
 
 # si un fichier est téléchargé, essayez de l'ouvrir comme une image
-if uploaded_file:
-
+if uploaded_file is not None:
     try:
         image = Image.open(uploaded_file)
 
         st.image(
             image,
             caption="Image sélectionnée",
-            use_container_width=True
+            use_container_width=True,
         )
 
-        st.success("Image chargée avec succès !")
-
-        with st.spinner("Analyse en cours... (Simulation)"):
-            # mocku^p
-            predictions = mock_predict(mode=mode_arg)
+        with st.spinner(f"Analyse en cours avec {selected_model_name}..."):
+            # Chargement du modèle et prédiction
+            model = load_model(str(selected_model_path))
+            predictions = np.asarray(model.predict(preprocess_image(image), verbose=0))
             
-            # Récupération du Top-3
-            top_3_indices = np.argsort(predictions)[-3:][::-1]
-            top_1_index = top_3_indices[0]
-            top_1_class = CLASS_NAMES[str(top_1_index)]
-            top_1_confidence = predictions[top_1_index]
+            if predictions.ndim > 1:
+                predictions = predictions[0]
 
-        # Affichage des résultats
+            # Top 3
+            top_3_indices = np.argsort(predictions)[-3:][::-1]
+            top_1_index = int(top_3_indices[0])
+            top_1_class = get_class_label(top_1_index)
+            top_1_confidence = float(predictions[top_1_index])
+
+        st.success(f"Modèle utilisé : {selected_model_name}")
+
+        # Affichage du résultat principal
         st.subheader("Résultat de l'analyse")
         if top_1_confidence < 0.50:
             st.warning(
                 f"**Attention :** Le modèle manque de certitude. "
-                f"Il penche pour **{top_1_class}** à {top_1_confidence:.1%}, "
-                f"mais l'image est peut-être atypique, floue, ou l'espèce est hors dataset."
+                f"Il penche pour **{top_1_class}** à {top_1_confidence:.1%}."
             )
         else:
-            st.success(f"**Prédiction principale : {top_1_class}** ({top_1_confidence:.1%} de confiance)")
+            st.success(
+                f"**Prédiction principale : {top_1_class}** ({top_1_confidence:.1%} de confiance)"
+            )
 
-        # Affichage du Top-3
-        st.markdown("### Top 3 des espèces les plus probables :")
-        for i, idx in enumerate(top_3_indices):
-            class_name = CLASS_NAMES[str(idx)]
-            confidence = float(predictions[idx])
-            
+        # Affichage top 3
+        st.markdown("### Top 3 des classes les plus probables :")
+        for rank, idx in enumerate(top_3_indices, start=1):
+            class_name = get_class_label(int(idx))
+            confidence = float(predictions[int(idx)])
+
             col1, col2 = st.columns([1, 3])
             with col1:
-                st.write(f"**{i+1}. {class_name}**")
+                st.write(f"**{rank}. {class_name}**")
             with col2:
                 st.progress(confidence, text=f"{confidence:.1%}")
 
     except UnidentifiedImageError:
         st.error("Le fichier n'est pas une image valide.")
-
