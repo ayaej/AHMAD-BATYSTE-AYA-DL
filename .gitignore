@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+venv/
+.venv/
+env/
+
+# Modèle entraîné (trop volumineux pour GitHub, voir lien Google Drive dans le README)
+models/*.keras
+models/*.h5
+
+# Données (trop volumineuses, source listée dans le README)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
