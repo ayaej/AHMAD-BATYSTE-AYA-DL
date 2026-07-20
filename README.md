@@ -44,8 +44,8 @@ pour jardiniers ou botanistes amateurs qui veulent identifier une plante en un c
 
 | Rôle | Responsable |
 |---|---|
-| Chargement et inspection des données | à définir |
-| Modèle (transfer learning, entraînement) | à définir |
+| Chargement et inspection des données | Ahmad |
+| Modèle (transfer learning, entraînement) | Ahmad |
 | WebApp (Streamlit) | à définir |
 | README / préparation soutenance | à définir |
 
